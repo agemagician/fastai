@@ -86,9 +86,12 @@ class AWD_LSTM(Module):
         if self.qrnn:
             #Using QRNN requires an installation of cuda
             from .qrnn import QRNN
-            self.rnns = [QRNN(emb_sz if l == 0 else n_hid, (n_hid if l != n_layers - 1 else emb_sz)//self.n_dir, 1,
-                              save_prev_x=True, zoneout=0, window=2 if l == 0 else 1, output_gate=True, bidirectional=bidir) 
-                         for l in range(n_layers)]
+            #self.rnns = [QRNN(emb_sz if l == 0 else n_hid, (n_hid if l != n_layers - 1 else emb_sz)//self.n_dir, 1,
+            #                  save_prev_x=True, zoneout=0, window=2 if l == 0 else 1, output_gate=True, bidirectional=bidir) 
+            #             for l in range(n_layers)]
+            self.rnns = [QRNN(emb_sz, (n_hid)//self.n_dir, n_layers,
+                              save_prev_x=True, zoneout=0, window=None, output_gate=True, bidirectional=bidir) 
+                        ]
             for rnn in self.rnns: 
                 rnn.layers[0].linear = WeightDropout(rnn.layers[0].linear, weight_p, layer_names=['weight'])
         else:
@@ -98,9 +101,11 @@ class AWD_LSTM(Module):
         self.rnns = nn.ModuleList(self.rnns)
         self.encoder.weight.data.uniform_(-self.initrange, self.initrange)
         self.input_dp = RNNDropout(input_p)
-        self.hidden_dps = nn.ModuleList([RNNDropout(hidden_p) for l in range(n_layers)])
+        # self.hidden_dps = nn.ModuleList([RNNDropout(hidden_p) for l in range(n_layers)])
+        self.hidden_dps = nn.ModuleList([RNNDropout(hidden_p) ])
 
     def forward(self, input:Tensor, from_embeddings:bool=False)->Tuple[List[Tensor],List[Tensor]]:
+        #from_embeddings = True
         if from_embeddings: bs,sl,es = input.size()
         else: bs,sl = input.size()
         if bs!=self.bs:
@@ -108,13 +113,19 @@ class AWD_LSTM(Module):
             self.reset()
         raw_output = self.input_dp(input if from_embeddings else self.encoder_dp(input))
         new_hidden,raw_outputs,outputs = [],[],[]
+        #print('berfoce loop')
+        #print(raw_output.shape)
         for l, (rnn,hid_dp) in enumerate(zip(self.rnns, self.hidden_dps)):
             raw_output, new_h = rnn(raw_output, self.hidden[l])
+            #print(raw_output.shape)
             new_hidden.append(new_h)
             raw_outputs.append(raw_output)
             if l != self.n_layers - 1: raw_output = hid_dp(raw_output)
             outputs.append(raw_output)
+            #print(l)
+            #print(l)
         self.hidden = to_detach(new_hidden, cpu=False)
+        #print('finished one forward')
         return raw_outputs, outputs
 
     def _one_hidden(self, l:int)->Tensor:
