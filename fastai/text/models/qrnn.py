@@ -1,6 +1,9 @@
 from ...torch_core import *
 from torch.utils.cpp_extension import load
 from torch.autograd import Function
+import os
+import random
+import torch
 
 __all__ = ['QRNNLayer', 'QRNN']
 
@@ -11,6 +14,21 @@ if torch.cuda.is_available():
     forget_mult_cuda = load(name='forget_mult_cuda', sources=[fastai_path/f for f in files])
     files = ['bwd_forget_mult_cuda.cpp', 'bwd_forget_mult_cuda_kernel.cu']
     bwd_forget_mult_cuda = load(name='bwd_forget_mult_cuda', sources=[fastai_path/f for f in files])
+    #rank_path = str(torch.distributed.get_rank) + '/'
+    #rank_path = str(random.randrange(100000000)) + ('/')
+    #b_path = '/media/agemagician/Disk2/projects/protin/fastai/tmp/' + rank_path
+    #os.mkdir(b_path)
+    #forget_mult_cuda = load(name='forget_mult_cuda', sources=[fastai_path/f for f in files], build_directory=b_path)
+    #files = ['bwd_forget_mult_cuda.cpp', 'bwd_forget_mult_cuda_kernel.cu']
+    #rank_path = str(int(os.environ['OMPI_COMM_WORLD_RANK'])) + '/'
+    #print(rank_path)
+    #rank_path = str(random.randrange(10000000)) + ('/')
+    #rank_path = str(torch.distributed.get_rank) + '/'
+    #b_path = '/media/agemagician/Disk2/projects/protin/fastai/tmp/' + rank_path
+    #print(b_path)
+    #b_path = './' + str(int(os.environ['OMPI_COMM_WORLD_RANK'])) + '/'
+    #os.mkdir(b_path)
+    #bwd_forget_mult_cuda = load(name='bwd_forget_mult_cuda', sources=[fastai_path/f for f in files], build_directory=b_path)
 
 def dispatch_cuda(cuda_class, cpu_func, x):
     return cuda_class.apply if x.device.type == 'cuda' else cpu_func
@@ -132,7 +150,7 @@ class QRNN(Module):
     def __init__(self, input_size:int, hidden_size:int, n_layers:int=1, bias:bool=True, batch_first:bool=True,
                  dropout:float=0, bidirectional:bool=False, save_prev_x:bool=False, zoneout:float=0, window:int=None, 
                  output_gate:bool=True):
-        assert not (save_prev_x and bidirectional), "Can't save the previous X with bidirectional."
+        #assert not (save_prev_x and bidirectional), "Can't save the previous X with bidirectional."
         assert bias == True, 'Removing underlying bias is not yet supported'
         super().__init__()
         kwargs = dict(batch_first=batch_first, zoneout=zoneout, output_gate=output_gate)
@@ -152,16 +170,22 @@ class QRNN(Module):
             for layer in self.layers_bwd: layer.reset()    
 
     def forward(self, inp, hid=None):
-        new_hid = []
+        #new_hid = []
         if self.bidirectional: inp_bwd = inp.clone()
         for i, layer in enumerate(self.layers):
-            inp, h = layer(inp, None if hid is None else hid[2*i if self.bidirectional else i])
+            #inp, h = layer(inp, None if hid is None else hid[2*i if self.bidirectional else i])
+            #nhid = []
+            new_hid = []
+            inp, h = layer(inp, None if hid is None else hid[0])
             new_hid.append(h)
             if self.bidirectional:
-                inp_bwd, h_bwd = self.layers_bwd[i](inp_bwd, None if hid is None else hid[2*i+1])
+                #inp_bwd, h_bwd = self.layers_bwd[i](inp_bwd, None if hid is None else hid[2*i+1])
+                inp_bwd, h_bwd = self.layers_bwd[i](inp_bwd, None if hid is None else hid[1])
                 new_hid.append(h_bwd)
             if self.dropout != 0 and i < len(self.layers) - 1:
                 for o in ([inp, inp_bwd] if self.bidirectional else [inp]):
                     o = F.dropout(o, p=self.dropout, training=self.training, inplace=False)
+
+            hid = new_hid 
         if self.bidirectional: inp = torch.cat([inp, inp_bwd], dim=2)
         return inp, torch.stack(new_hid, 0)
